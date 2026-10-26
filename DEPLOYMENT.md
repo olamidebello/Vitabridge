@@ -53,3 +53,24 @@ This deploys the current development preview. No server execution or DNS change 
 Panel hosts may listen on a specific IPv4 address. Nginx chooses that address group before matching a hostname on a wildcard listener. The VitaBridge host now binds both wildcard and the server's default IPv4 address, plus IPv6 wildcard. Set `vitabridge_bind_ipv4` to a list of relevant local addresses when the server uses another panel listener address. No other virtual hosts are removed.
 
 Before contacting Let's Encrypt, the playbook creates a unique challenge file and checks its exact contents over the local IP/Host header and the domain URL without redirects. If either check fails, it rolls back and saves the active Nginx configuration to `/var/log/vitabridge-nginx-deploy.log` (root-only). A server-origin domain check is a useful preflight; successful ACME authorization remains the external reachability test. Check all A/AAAA records and upstream proxies if failures persist.
+
+## One command: current website, accounts and Android APK
+
+On your Olamidepanel server, update the administration checkout once and run:
+
+```bash
+cd /opt/Vitabridge
+git pull --ff-only origin main
+bash scripts/pull-and-deploy.sh dobcalldemo@gmail.com
+```
+
+The wrapper subsequently pulls the latest source each time. The new `ansible/pull-and-deploy.yml` runs the website/account deployment, then downloads the published Android preview, verifies its release SHA-256, publishes a checksum for the installed copy, changes the install page to use the local download, and verifies the public HTTPS APK bytes. It stops if no successful Android release exists. Website rollback remains in the underlying playbook; a mobile-download failure stops after the website deployment and does not roll back accounts or erase their database.
+
+Public endpoints after successful execution:
+- `/install.html`
+- `/downloads/VitaBridge-preview.apk`
+- `/downloads/VitaBridge-preview.apk.sha256`
+
+Accounts use `/var/lib/vitabridge/accounts.sqlite3` and `vitabridge-accounts.service`. This is still a development preview and does not provision clinical authorization or live dispatch.
+
+The public African Apps Store must be updated on **its own hosting server**, not automatically on the VitaBridge server. From its existing `africanappsstore` deployment checkout, pull main and run `ansible-playbook -i localhost, -c local ansible/pull-and-deploy.yml`. That repository already contains the VitaBridge catalog installer. The app listing links the VitaBridge installation page; no store credentials or data are copied between hosts.
