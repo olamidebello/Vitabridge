@@ -1,0 +1,181 @@
+---
+- name: Pull and deploy VitaBridge on Olamidepanel
+  hosts: '{{ deploy_hosts | default("vitabridge") }}'
+  become: true
+  serial: 1
+  vars:
+    domain: vitabridge.olamidemedical.health
+    repository_url: https://github.com/olamidebello/Vitabridge.git
+    repository_version: main
+    source_dir: /opt/vitabridge-source
+    deploy_root: /var/www/vitabridge
+    vhost_path: /etc/nginx/conf.d/vitabridge-preview.conf
+    enable_tls: true
+    certbot_email: ''
+  tasks:
+    - name: Validate domain and TLS contact
+      ansible.builtin.assert:
+        that:
+          - domain is match('^[a-z0-9][a-z0-9.-]+[a-z0-9]$')
+          - not (enable_tls | bool) or certbot_email is match('^[^ @]+@[^ @]+[.][^ @]+$')
+        fail_msg: Supply certbot_email for TLS or explicitly set enable_tls=false.
+    - name: Install deployment dependencies
+      ansible.builtin.apt:
+        name: [git, nginx, certbot, ca-certificates]
+        state: present
+        update_cache: true
+    - name: Check existing nginx before making changes
+      ansible.builtin.command: nginx -t
+      changed_when: false
+    - name: Pull application on the target server
+      ansible.builtin.git:
+        repo: '{{ repository_url }}'
+        dest: '{{ source_dir }}'
+        version: '{{ repository_version }}'
+        update: true
+        force: false
+      register: source
+    - name: Check deployable application
+      ansible.builtin.stat:
+        path: '{{ source_dir }}/dist/index.html'
+      register: app
+    - name: Require built static application
+      ansible.builtin.assert:
+        that: app.stat.exists
+    - name: Create release and ACME directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        mode: '0755'
+      loop:
+        - '{{ deploy_root }}/releases/{{ source.after }}'
+        - '{{ deploy_root }}/acme'
+    - name: Stage versioned release
+      ansible.builtin.copy:
+        src: '{{ source_dir }}/dist/'
+        dest: '{{ deploy_root }}/releases/{{ source.after }}/'
+        remote_src: true
+        mode: preserve
+    - name: Inspect previous active release
+      ansible.builtin.stat:
+        path: '{{ deploy_root }}/current'
+        follow: false
+      register: previous
+    - name: Require managed release pointer
+      ansible.builtin.assert:
+        that: not previous.stat.exists or previous.stat.islnk
+        fail_msg: Current path must be absent or a symlink; refusing to replace an unmanaged directory.
+    - name: Check existing certificate
+      ansible.builtin.stat:
+        path: '/etc/letsencrypt/live/{{ domain }}/fullchain.pem'
+      register: certificate
+    - name: Save previous vhost
+      ansible.builtin.slurp:
+        src: '{{ vhost_path }}'
+      register: old_vhost
+      failed_when: false
+    - name: Deploy and verify with rollback
+      block:
+        - name: Activate release
+          ansible.builtin.file:
+            src: '{{ deploy_root }}/releases/{{ source.after }}'
+            dest: '{{ deploy_root }}/current'
+            state: link
+            force: true
+        - name: Configure dedicated host
+          ansible.builtin.template:
+            src: vitabridge.conf.j2
+            dest: '{{ vhost_path }}'
+            mode: '0644'
+          vars:
+            tls_ready: '{{ certificate.stat.exists }}'
+        - name: Validate complete configuration and reject conflicts
+          ansible.builtin.command: nginx -t
+          register: nginx_check
+          changed_when: false
+          failed_when: nginx_check.rc != 0 or 'conflicting server name "' ~ domain ~ '"' in nginx_check.stderr
+        - name: Reload valid web server
+          ansible.builtin.service:
+            name: nginx
+            state: reloaded
+            enabled: true
+        - name: Obtain or renew domain certificate using webroot
+          ansible.builtin.command:
+            argv: [certbot, certonly, --webroot, -w, '{{ deploy_root }}/acme', --non-interactive, --agree-tos, --email, '{{ certbot_email }}', -d, '{{ domain }}', --keep-until-expiring]
+          when: enable_tls | bool
+        - name: Enable HTTPS after certificate issuance
+          ansible.builtin.template:
+            src: vitabridge.conf.j2
+            dest: '{{ vhost_path }}'
+            mode: '0644'
+          vars:
+            tls_ready: true
+          when: enable_tls | bool
+        - name: Validate final nginx configuration
+          ansible.builtin.command: nginx -t
+          changed_when: false
+        - name: Reload final configuration
+          ansible.builtin.service:
+            name: nginx
+            state: reloaded
+        - name: Verify local HTTP routing when HTTPS is disabled
+          ansible.builtin.uri:
+            url: http://127.0.0.1/
+            headers:
+              Host: '{{ domain }}'
+            return_content: true
+          register: http_health
+          failed_when: http_health.status != 200 or 'VitaBridge' not in http_health.content
+          when: not (enable_tls | bool) and not certificate.stat.exists
+        - name: Verify public HTTPS certificate and application
+          ansible.builtin.uri:
+            url: 'https://{{ domain }}/'
+            validate_certs: true
+            return_content: true
+          register: https_health
+          failed_when: https_health.status != 200 or 'VitaBridge' not in https_health.content
+          when: (enable_tls | bool) or certificate.stat.exists
+        - name: Install certificate renewal with nginx reload
+          ansible.builtin.copy:
+            dest: /etc/cron.d/vitabridge-certbot
+            mode: '0644'
+            content: |
+              17 3 * * * root certbot renew --quiet --deploy-hook "systemctl reload nginx"
+          when: enable_tls | bool
+      rescue:
+        - name: Restore previous release
+          ansible.builtin.file:
+            src: '{{ previous.stat.lnk_source }}'
+            dest: '{{ deploy_root }}/current'
+            state: link
+            force: true
+          when: previous.stat.islnk | default(false)
+        - name: Remove failed initial release pointer
+          ansible.builtin.file:
+            path: '{{ deploy_root }}/current'
+            state: absent
+          when: not (previous.stat.exists | default(false))
+        - name: Restore previous virtual host
+          ansible.builtin.copy:
+            content: '{{ old_vhost.content | b64decode }}'
+            dest: '{{ vhost_path }}'
+            mode: '0644'
+          when: old_vhost.content is defined
+        - name: Remove failed initial virtual host
+          ansible.builtin.file:
+            path: '{{ vhost_path }}'
+            state: absent
+          when: old_vhost.content is not defined
+        - name: Validate restored configuration
+          ansible.builtin.command: nginx -t
+          changed_when: false
+        - name: Reload restored configuration
+          ansible.builtin.service:
+            name: nginx
+            state: reloaded
+        - name: Report failed deployment
+          ansible.builtin.fail:
+            msg: Deployment failed; previous release and dedicated virtual host restored. Inspect DNS, duplicate hosts, ACME and nginx errors above.
+    - name: Report deployed version
+      ansible.builtin.debug:
+        msg: 'Deployed VitaBridge preview {{ source.after }} to {{ domain }}. Live dispatch/payment backend is not provisioned.'

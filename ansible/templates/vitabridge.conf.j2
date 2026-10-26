@@ -1,0 +1,28 @@
+# Managed by Vitabridge/ansible/olamidepanel.yml
+server {
+    listen 80;
+    server_name {{ domain }};
+    location ^~ /.well-known/acme-challenge/ { root {{ deploy_root }}/acme; }
+{% if tls_ready | bool %}
+    location / { return 301 https://$host$request_uri; }
+{% else %}
+    root {{ deploy_root }}/current;
+    index index.html;
+    location / { try_files $uri $uri/ =404; }
+{% endif %}
+}
+{% if tls_ready | bool %}
+server {
+    listen 443 ssl;
+    server_name {{ domain }};
+    ssl_certificate /etc/letsencrypt/live/{{ domain }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ domain }}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    root {{ deploy_root }}/current;
+    index index.html;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    location / { try_files $uri $uri/ =404; }
+    location ~ ^/(sw.js|app.js|admin.js|index.html)$ { add_header Cache-Control "no-cache"; }
+}
+{% endif %}
