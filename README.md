@@ -27,3 +27,11 @@ Offline caching contains only the application shell. No PHI or emergency request
 
 ## Brand
 Forest teal #15564B, mint #DCEEE5, ivory #F5F7F3 and muted coral. Tagline: Care, connected. `dist/assets/logo.svg` and `icon.svg` are scalable code-native brand assets. `brand-art.jpg` was created with the built-in image generation tool using an ambulance/paramedic/home-to-hospital bridge concept. Prompt recorded in `BRAND.md`.
+
+## Super admin, multi-tenant and marketplace preview
+
+Select **Super admin** to create/edit/suspend organizations, manage tenant memberships and roles, toggle booking/marketplace features, edit products, review/cancel demo orders, adjust demo credits with a reason, and configure payment-provider references. The tenant selector switches between independent in-memory datasets for journeys, fleet, records, users, products, orders, gateway settings, features, profile and session audit history. Suspended tenants cannot create bookings or orders. Administrative pages remain demonstration controls, not server-enforced authorization.
+
+The marketplace supports product publication/archive, currency amounts stored in integer minor units, and order snapshots that preserve the purchase amount after product edits. Stripe, PayPal, Paystack and Flutterwave settings are **test configuration interfaces only**. They accept environment-variable names, not secret values. Simulated orders remain explicitly unpaid. No checkout API, webhook verification, refund, payout, financial wallet, subscription renewal or provider SDK is implemented. Demo credits are session-only counters, not money.
+
+Before production, implement authenticated server-side tenant membership checks on every resource; compound tenant keys and database policies; safe super-admin elevation; immutable platform and tenant audits; provider secret storage; server-priced checkout; idempotency; signed webhook verification; reconciliation; refund authorization; and currency/provider availability validation. Do not use this preview for production multi-tenant patient data or payments.
