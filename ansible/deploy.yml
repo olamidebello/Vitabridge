@@ -1,0 +1,83 @@
+---
+- name: Publish VitaBridge development preview
+  hosts: vitabridge
+  become: true
+  vars:
+    domain: vitabridge.olamidemedical.health
+    web_root: /var/www/vitabridge-preview
+    enable_tls: false
+    certbot_email: ''
+  tasks:
+    - name: Install web server
+      ansible.builtin.apt:
+        name: [nginx, certbot, python3-certbot-nginx]
+        update_cache: true
+    - name: Create dedicated web root
+      ansible.builtin.file:
+        path: '{{ web_root }}'
+        state: directory
+        mode: '0755'
+    - name: Copy preview assets from reviewed checkout
+      ansible.builtin.copy:
+        src: ../dist/
+        dest: '{{ web_root }}/'
+        mode: '0644'
+        directory_mode: '0755'
+    - name: Install dedicated virtual host with rollback
+      block:
+        - name: Write virtual host
+          ansible.builtin.copy:
+            dest: /etc/nginx/conf.d/vitabridge-preview.conf
+            backup: true
+            mode: '0644'
+            content: |
+              server {
+                listen 80;
+                server_name {{ domain }};
+                root {{ web_root }};
+                index index.html;
+                add_header X-Content-Type-Options nosniff always;
+                add_header Referrer-Policy strict-origin-when-cross-origin always;
+                add_header Permissions-Policy "geolocation=(self),camera=(),microphone=()" always;
+                location / { try_files $uri $uri/ =404; }
+                location ~ ^/(sw.js|app.js|index.html)$ { add_header Cache-Control "no-cache"; }
+              }
+          register: vhost
+        - name: Validate full nginx configuration
+          ansible.builtin.command: nginx -t
+          changed_when: false
+      rescue:
+        - name: Restore previous dedicated host when available
+          ansible.builtin.copy:
+            src: '{{ vhost.backup_file }}'
+            dest: /etc/nginx/conf.d/vitabridge-preview.conf
+            remote_src: true
+          when: vhost.backup_file is defined
+        - name: Remove new invalid dedicated host
+          ansible.builtin.file:
+            path: /etc/nginx/conf.d/vitabridge-preview.conf
+            state: absent
+          when: vhost.backup_file is not defined
+        - name: Stop after validation failure
+          ansible.builtin.fail:
+            msg: 'nginx validation failed; dedicated vhost restored. Existing nginx process was not reloaded.'
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+        enabled: true
+    - name: Require ACME contact for TLS
+      ansible.builtin.assert:
+        that: certbot_email | length > 3
+      when: enable_tls | bool
+    - name: Obtain certificate after DNS and inbound port 80 are ready
+      ansible.builtin.command:
+        argv: [certbot, --nginx, --non-interactive, --agree-tos, --redirect, -m, '{{ certbot_email }}', -d, '{{ domain }}', --keep-until-expiring]
+      when: enable_tls | bool
+    - name: Verify local hostname routing
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1/'
+        headers:
+          Host: '{{ domain }}'
+        follow_redirects: none
+        status_code: [200, 301, 302]
