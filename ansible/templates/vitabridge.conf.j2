@@ -12,6 +12,7 @@ server {
 {% else %}
     root {{ deploy_root }}/current;
     index index.html;
+    location /api/ { proxy_pass http://127.0.0.1:18872; proxy_set_header Host $host; proxy_set_header Origin $http_origin; }
     location / { try_files $uri $uri/ =404; }
 {% endif %}
 }
@@ -30,6 +31,7 @@ server {
     index index.html;
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
+    location /api/ { proxy_pass http://127.0.0.1:18872; proxy_set_header Host $host; proxy_set_header Origin $http_origin; }
     location / { try_files $uri $uri/ =404; }
     location ~ ^/(sw.js|app.js|admin.js|index.html)$ { add_header Cache-Control "no-cache"; }
 }

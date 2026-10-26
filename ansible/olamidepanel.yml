@@ -35,6 +35,59 @@
         update: true
         force: false
       register: source
+    - name: Create restricted account service user
+      ansible.builtin.user:
+        name: vitabridge
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+    - name: Create account service directory
+      ansible.builtin.file:
+        path: /opt/vitabridge-accounts
+        state: directory
+        mode: '0755'
+    - name: Install account service code
+      ansible.builtin.copy:
+        src: '{{ source_dir }}/server/auth.py'
+        dest: /opt/vitabridge-accounts/auth.py
+        remote_src: true
+        mode: '0644'
+    - name: Install isolated account service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/vitabridge-accounts.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=VitaBridge account service
+          After=network.target
+          [Service]
+          User=vitabridge
+          Group=vitabridge
+          StateDirectory=vitabridge
+          StateDirectoryMode=0700
+          Environment=VITABRIDGE_ORIGIN=https://{{ domain }}
+          ExecStart=/usr/bin/python3 /opt/vitabridge-accounts/auth.py
+          Restart=on-failure
+          NoNewPrivileges=true
+          ProtectSystem=strict
+          ProtectHome=true
+          PrivateTmp=true
+          UMask=0077
+          [Install]
+          WantedBy=multi-user.target
+    - name: Start updated account service
+      ansible.builtin.systemd:
+        name: vitabridge-accounts
+        daemon_reload: true
+        state: restarted
+        enabled: true
+    - name: Verify account service
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18872/api/health
+      register: account_health
+      retries: 5
+      delay: 1
+      until: account_health.status == 200
     - name: Check deployable application
       ansible.builtin.stat:
         path: '{{ source_dir }}/dist/index.html'

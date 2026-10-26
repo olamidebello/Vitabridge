@@ -1,0 +1,50 @@
+name: Build VitaBridge Android preview
+on:
+  push:
+    branches: [main]
+    paths: ['mobile/**', '.github/workflows/android-preview.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: android-preview
+  cancel-in-progress: false
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: vitabridge-development-signing-v1
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Build signed development APK
+        working-directory: mobile/android
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Verify signature and generate checksum
+        run: |
+          mkdir -p release
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk release/VitaBridge-preview.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose release/VitaBridge-preview.apk
+          cd release
+          sha256sum VitaBridge-preview.apk > VitaBridge-preview.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VitaBridge-Android-preview
+          path: release/*
+      - name: Publish preview installation files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view android-preview >/dev/null 2>&1 || gh release create android-preview --prerelease --title "VitaBridge Android development preview" --notes "Development WebView preview. Not a Play Store release or emergency dispatch app. Requires a deployed HTTPS website. Signing cache loss may require uninstalling the old preview before reinstalling."
+          gh release upload android-preview release/* --clobber
