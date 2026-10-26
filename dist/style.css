@@ -3,3 +3,5 @@
 header{flex-wrap:wrap}#tenant{margin-left:auto;margin-right:12px;max-width:220px}nav{max-height:68vh;overflow-y:auto}@media(max-width:650px){#tenant{margin:8px 0;width:100%;max-width:none}nav{max-height:none}header{gap:8px}}
 
 .brand-logo{display:block;width:100%;height:auto}.footer-brand{display:flex;align-items:center;gap:8px}.care-art{display:block;width:100%;height:auto;border-radius:10px;margin:18px 0}.brand-slogan{font:700 18px Manrope,sans-serif;color:var(--green)}.hero{padding:30px;min-height:240px}.hero img{width:48%;object-fit:cover;object-position:right center}.hero .hero-text{max-width:50%}@media(max-width:650px){.brand-logo{width:205px}.hero{padding:22px 22px 0}.hero img{position:relative;width:calc(100% + 44px);max-width:none;margin:20px -22px 0;height:auto;opacity:1;display:block}.hero .hero-text{max-width:100%}.hero h2{max-width:none}}
+
+footer{flex-wrap:wrap}footer a{color:var(--green);display:inline-block;padding:5px 2px}
