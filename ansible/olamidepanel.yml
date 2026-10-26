@@ -50,6 +50,7 @@
       loop:
         - '{{ deploy_root }}/releases/{{ source.after }}'
         - '{{ deploy_root }}/acme'
+        - '{{ deploy_root }}/acme/.well-known/acme-challenge'
     - name: Stage versioned release
       ansible.builtin.copy:
         src: '{{ source_dir }}/dist/'
@@ -99,6 +100,34 @@
             name: nginx
             state: reloaded
             enabled: true
+        - name: Generate unique ACME routing probe
+          ansible.builtin.set_fact:
+            acme_probe: 'vitabridge-{{ ansible_date_time.epoch }}-{{ 999999999 | random }}'
+        - name: Write ACME routing probe
+          ansible.builtin.copy:
+            dest: '{{ deploy_root }}/acme/.well-known/acme-challenge/{{ acme_probe }}'
+            content: '{{ acme_probe }}'
+            mode: '0644'
+        - name: Verify challenge through local IP-specific virtual host
+          ansible.builtin.uri:
+            url: 'http://{{ ansible_default_ipv4.address }}/.well-known/acme-challenge/{{ acme_probe }}'
+            headers:
+              Host: '{{ domain }}'
+            follow_redirects: none
+            return_content: true
+          register: local_acme
+          failed_when: local_acme.status != 200 or local_acme.content | default('') != acme_probe
+        - name: Verify challenge using domain DNS before contacting ACME
+          ansible.builtin.uri:
+            url: 'http://{{ domain }}/.well-known/acme-challenge/{{ acme_probe }}'
+            follow_redirects: none
+            return_content: true
+          register: public_acme
+          failed_when: public_acme.status != 200 or public_acme.content | default('') != acme_probe
+        - name: Remove successful probe
+          ansible.builtin.file:
+            path: '{{ deploy_root }}/acme/.well-known/acme-challenge/{{ acme_probe }}'
+            state: absent
         - name: Obtain or renew domain certificate using webroot
           ansible.builtin.command:
             argv: [certbot, certonly, --webroot, -w, '{{ deploy_root }}/acme', --non-interactive, --agree-tos, --email, '{{ certbot_email }}', -d, '{{ domain }}', --keep-until-expiring]
@@ -143,6 +172,22 @@
               17 3 * * * root certbot renew --quiet --deploy-hook "systemctl reload nginx"
           when: enable_tls | bool
       rescue:
+        - name: Capture active nginx routing for troubleshooting
+          ansible.builtin.command: nginx -T
+          register: failed_routing
+          changed_when: false
+          failed_when: false
+        - name: Save routing diagnostics locally on server
+          ansible.builtin.copy:
+            dest: /var/log/vitabridge-nginx-deploy.log
+            content: '{{ failed_routing.stdout | default("") }}
+{{ failed_routing.stderr | default("") }}'
+            mode: '0600'
+        - name: Remove failed ACME routing probe
+          ansible.builtin.file:
+            path: '{{ deploy_root }}/acme/.well-known/acme-challenge/{{ acme_probe }}'
+            state: absent
+          when: acme_probe is defined
         - name: Restore previous release
           ansible.builtin.file:
             src: '{{ previous.stat.lnk_source }}'

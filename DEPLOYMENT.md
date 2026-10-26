@@ -47,3 +47,9 @@ ansible-playbook -i localhost, -c local ansible/olamidepanel.yml -e deploy_hosts
 Before running, point the domain's A record to this server and ensure any AAAA record routes correctly. Allow inbound TCP 80/443. Private repositories require an SSH deploy key and a `repository_url` override using the SSH URL; configure GitHub's verified host key separately. Do not put access tokens in command lines or the repository. Git refuses to discard target checkout modifications. Override `repository_version` with a reviewed commit SHA for pinned releases. Initial TLS failure rolls back the site; correct DNS/ACME errors before retrying.
 
 This deploys the current development preview. No server execution or DNS change is performed merely by adding this playbook.
+
+## ACME 404 on Olamidepanel
+
+Panel hosts may listen on a specific IPv4 address. Nginx chooses that address group before matching a hostname on a wildcard listener. The VitaBridge host now binds both wildcard and the server's default IPv4 address, plus IPv6 wildcard. Set `vitabridge_bind_ipv4` to a list of relevant local addresses when the server uses another panel listener address. No other virtual hosts are removed.
+
+Before contacting Let's Encrypt, the playbook creates a unique challenge file and checks its exact contents over the local IP/Host header and the domain URL without redirects. If either check fails, it rolls back and saves the active Nginx configuration to `/var/log/vitabridge-nginx-deploy.log` (root-only). A server-origin domain check is a useful preflight; successful ACME authorization remains the external reachability test. Check all A/AAAA records and upstream proxies if failures persist.
