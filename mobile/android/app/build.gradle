@@ -1,6 +1,13 @@
 plugins { id 'com.android.application' }
+def buildNumber = System.getenv('GITHUB_RUN_NUMBER') ?: '1'
 android {
  namespace 'com.olamide.vitabridge'
  compileSdk 35
- defaultConfig { applicationId 'com.olamide.vitabridge.preview'; minSdk 26; targetSdk 35; versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger(); versionName '0.1-preview' }
+ defaultConfig {
+  applicationId 'com.olamide.vitabridge.preview'
+  minSdk 26
+  targetSdk 35
+  versionCode Integer.parseInt(buildNumber)
+  versionName '0.1-preview'
+ }
 }
